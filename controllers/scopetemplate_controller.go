@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/sirupsen/logrus"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,6 +43,8 @@ import (
 type ScopeTemplateReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	logger *logrus.Logger
 }
 
 //+kubebuilder:rbac:groups=operators.io.operator-framework,resources=scopetemplates,verbs=get;list;watch;create;update;patch;delete
@@ -63,15 +66,15 @@ func (r *ScopeTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.Log.Info("Reconciling ScopeTemplate")
 
 	// get the scope template
-	in := &operatorsv1.ScopeTemplate{}
-	if err := r.Client.Get(ctx, req.NamespacedName, in); err != nil {
+	st := &operatorsv1.ScopeTemplate{}
+	if err := r.Client.Get(ctx, req.NamespacedName, st); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	log.Log.Info("Getting ScopeTemplate", "name", in.Name)
+	log.Log.Info("Getting ScopeTemplate", "name", st.Name)
 
 	// create ClusterRoles based on the ScopeTemplate
-	if err := r.createClusterRoles(ctx, in); err != nil {
+	if err := r.createClusterRoles(ctx, st); err != nil {
 		return ctrl.Result{}, fmt.Errorf("create ClusterRoles: %v", err)
 	}
 
@@ -80,7 +83,7 @@ func (r *ScopeTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Client.Get(ctx, req.NamespacedName, sTemplate); err != nil {
 		if !k8sapierrors.IsNotFound(err) {
 			// Delete ClusterRoles associated with ScopeTemplate if/when the ScopeTemplate gets deleted
-			if err := r.deleteClusterRoles(ctx, in); err != nil {
+			if err := r.deleteClusterRoles(ctx, st); err != nil {
 				return ctrl.Result{}, fmt.Errorf("delete ClusterRoles: %v", err)
 			}
 		}
@@ -106,24 +109,45 @@ func (r *ScopeTemplateReconciler) mapToScopeTemplate(obj client.Object) (request
 		return
 	}
 
-	ctx := context.TODO()
+	//ctx := context.TODO()
 	// (todo): Check if obj can be converted into a scope instance.
-	scopeInstance := &operatorsv1.ScopeInstance{}
-	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: obj.GetNamespace(), Name: scopeInstance.Spec.ScopeTemplateName}, scopeInstance); err != nil {
+	// scopeInstance := &operatorsv1.ScopeInstance{}
+	// if err := r.Client.Get(ctx, types.NamespacedName{Namespace: obj.GetNamespace(), Name: scopeInstance.Spec.ScopeTemplateName}, scopeInstance); err != nil {
+	// 	return nil
+	// }
+
+	// // Exit early if scopeInstance doesn't reference a scopeTemplate
+	// if scopeInstance.Spec.ScopeTemplateName == "" {
+	// 	return nil
+	// }
+
+	// // enqueue requests for ScopeTemplate based on Name and Namespace
+	// request := reconcile.Request{
+	// 	NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: scopeInstance.Spec.ScopeTemplateName},
+	// }
+
+	// requests = append(requests, request)
+
+	//my changes
+	ctx := context.TODO()
+	scopeTemplateList := &operatorsv1.ScopeTemplateList{}
+
+	if err := r.Client.List(ctx, scopeTemplateList); err != nil {
+		r.logger.Error(err, "error listing scope instances")
 		return nil
 	}
 
-	// Exit early if scopeInstance doesn't reference a scopeTemplate
-	if scopeInstance.Spec.ScopeTemplateName == "" {
-		return nil
-	}
+	for _, si := range scopeTemplateList.Items {
+		// if si.GetName() != obj. {
+		// 	continue
+		// }
 
-	// enqueue requests for ScopeTemplate based on Name and Namespace
-	request := reconcile.Request{
-		NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: scopeInstance.Spec.ScopeTemplateName},
-	}
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{Namespace: si.GetNamespace(), Name: si.GetName()},
+		}
 
-	requests = append(requests, request)
+		requests = append(requests, request)
+	}
 
 	return requests
 }
